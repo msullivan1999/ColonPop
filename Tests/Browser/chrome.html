@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ColonPop browser check</title>
+<style>
+  :root { color-scheme: light dark; font: 16px system-ui; }
+  body { margin: 3rem auto; padding: 0 1.5rem; max-width: 40rem; }
+  h1 { font-size: 1.5rem; }
+  label, #rich-label { display: block; font-weight: 600; margin: 1.5rem 0 .5rem; }
+  input, textarea, [contenteditable] { box-sizing: border-box; width: 100%; padding: .65rem; font: inherit; color: FieldText; background: Field; border: 1px solid GrayText; border-radius: .35rem; }
+  #rich { min-height: 4rem; }
+  output { display: block; margin-top: 1.5rem; }
+</style>
+<h1>ColonPop browser check</h1>
+<p>In each field, type <code>:wave</code> and press Return. Each should contain 👋 and the page’s Return count should stay at zero. Press Return after dismissing the picker to check ordinary keyboard behavior.</p>
+<form>
+  <label for="single">Single-line input</label>
+  <input id="single" autocomplete="off">
+  <label for="multi">Multiline text area</label>
+  <textarea id="multi" rows="3"></textarea>
+  <div id="rich-label">Rich-text editor</div>
+  <div id="rich" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="rich-label"></div>
+</form>
+<output>Page received Return 0 times. Form submissions 0.</output>
+<script>
+  let returns = 0;
+  let submissions = 0;
+  const status = document.querySelector("output");
+  function update() {
+    status.textContent = `Page received Return ${returns} times. Form submissions ${submissions}.`;
+  }
+  document.addEventListener("keydown", event => {
+    if (event.key === "Enter") { returns++; update(); }
+  });
+  document.querySelector("form").addEventListener("submit", event => {
+    event.preventDefault();
+    submissions++;
+    update();
+  });
+  // The native integration runner uses only this disposable page. Each field owns
+  // its fixture text. Only a real browser input event advances the check.
+  const runID = location.hash.slice(1);
+  if (/^colonpop-[0-9a-f-]{36}$/i.test(runID)) {
+    const fields = ["single", "multi", "rich"];
+    function prepare(index) {
+      if (index === fields.length) { document.title = runID + " passed"; return; }
+      const id = fields[index];
+      const field = document.getElementById(id);
+      if (id === "rich") { field.innerHTML = "<b>Before </b>:wave<i> after</i>"; }
+      else { field.value = "Before :wave after"; }
+      field.focus();
+      if (id === "rich") { getSelection().collapse(field.childNodes[1], 0); }
+      else { field.setSelectionRange(7, 7); }
+      document.title = runID + " " + id;
+      field.addEventListener("input", event => {
+        const value = id === "rich" ? field.textContent : field.value;
+        if (!event.isTrusted || value !== "Before 👋 after" || returns || submissions) { return; }
+        if (id === "rich" && (field.querySelector("b")?.textContent.trim() !== "Before" ||
+                              field.querySelector("i")?.textContent.trim() !== "after")) { return; }
+        // Let the native client acknowledge the result before focus moves.
+        setTimeout(() => prepare(index + 1), 550);
+      });
+    }
+    prepare(0);
+  }
+</script>
+</html>

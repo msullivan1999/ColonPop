@@ -4,11 +4,13 @@ A small native macOS menu-bar app for typing emoji by name. In a text field, typ
 
 ## Install
 
-1. Unzip `ColonPop-0.1.2-macOS.zip`, move **ColonPop.app** to **Applications**, then open it. If updating, choose **Quit ColonPop** from its menu-bar icon before replacing the previous version. The universal binary runs on Apple silicon and Intel Macs with macOS 13 or later.
+1. Unzip `ColonPop-0.1.3-macOS.zip`, move **ColonPop.app** to **Applications**, then open it. If updating, choose **Quit ColonPop** from its menu-bar icon before replacing the previous version. The universal binary runs on Apple silicon and Intel Macs with macOS 13 or later.
 2. Choose **Open Accessibility Settings…** in the setup window and enable **ColonPop**. If your Mac also requires Input Monitoring, the setup window shows that step. Reopen the app if macOS requests a restart.
-3. From the smiley in the menu bar, choose **Test Picker…** to check the installed app. It types a few shortcodes in a temporary editor and checks the popup, Return, a row click, Escape, a closing colon and ordinary punctuation. Leave that window in front during the check. You can also open TextEdit and try `:tada:`.
+3. From the smiley in the menu bar, choose **Test Picker…** to check the installed app. The check opens a temporary editor. If keyboard insertion is enabled, it tests the popup, Return, a row click, Escape, a closing colon and ordinary punctuation automatically. Otherwise, type the example shown in the window. You can also open TextEdit and try `:tada:`.
 
-**After an update:** If Setup still says **Enable ColonPop** when the old entry is already enabled, remove that entry in **System Settings → Privacy & Security → Accessibility**, then add the copy in **Applications**. Setup shows the version and path of the running copy. Ad-hoc builds have a different signing identity each time their code changes. [Apple’s code signing note](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+**After an update**
+
+If Setup still says **Enable ColonPop** when the old entry is already enabled, remove that entry in **System Settings → Privacy & Security → Accessibility**, then add the copy in **Applications**. Setup shows the version and path of the running copy. Ad-hoc builds have a different signing identity each time their code changes. [Apple’s code signing note](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 
 **Suggestions are on** means ColonPop has a working listener and can replace the shortcode in fields that allow Accessibility editing. Choose **Allow Keyboard Insertion…** in Setup for editors that need keyboard events. The smiley also lets you pause ColonPop or turn on **Open at Login**. If another system-wide shortcode picker is running, pause it while trying ColonPop.
 
@@ -16,7 +18,7 @@ The default build is ad-hoc signed. If Gatekeeper blocks a downloaded copy you t
 
 ## Use
 
-Start a shortcode at the beginning of a field, after whitespace, after an opening bracket or quote, or just after another emoji. Ordinary punctuation in `12:30` and `https://` stays quiet. Suggestions appear at the caret when the editor exposes its screen position and near the pointer otherwise.
+Start a shortcode at the beginning of a field, after whitespace, after an opening bracket or quote, or just after another emoji. A bare `:` offers favorites. The first Down arrow highlights the first one. Return keeps its usual behavior until a row is highlighted. Ordinary punctuation in `12:30` and `https://` stays quiet. Suggestions appear at the caret when the editor exposes its screen position and near the pointer otherwise.
 
 | Input | Result |
 | --- | --- |
@@ -35,7 +37,9 @@ ColonPop uses Swift, AppKit, a Quartz session event tap and the macOS Accessibil
 
 Return, Tab and row clicks use the same insertion path. ColonPop gives the editor time to process the last keystroke and rechecks the focused field. When macOS permits it, ColonPop sends the edit to that application as keyboard events. Otherwise it attempts a native Accessibility edit and checks that the emoji appeared. When an editor reports a stale caret, ColonPop can verify the selected shortcode before inserting the emoji. For simple controls with limited text APIs, it can use the tracked shortcode length. Custom controls need to expose an identifiable text input and support one of those editing methods.
 
-The catalog ships with the app. Search text lives in memory for the active query. The app uses neither the network nor the clipboard, and writes no typing history. It skips Secure Input and controls macOS identifies as password fields.
+In Google Chrome, ColonPop selects the exact shortcode and asks the browser to replace that range. When the browser lacks a direct replacement action, ColonPop briefly puts the emoji on the system clipboard and invokes Chrome’s Paste command. It restores the previous items and formats after the edit, provided the clipboard still belongs to that operation. A newer copy takes precedence. For a clipboard marked confidential or promised, or too large to preserve, ColonPop leaves it alone and uses keyboard insertion if available. Clipboard managers may see the temporary emoji.
+
+The catalog ships with the app. Search text stays in memory for the active query. ColonPop works offline, writes no typing history, and skips Secure Input and controls macOS identifies as password fields.
 
 ## Build
 
@@ -52,7 +56,9 @@ To run the cross-application check against a release from an interactive Mac des
 dist/ColonPop.app/Contents/MacOS/ColonPop --test-picker --exit-after-check
 ```
 
-The script builds and verifies both architectures, creates the app icon, and produces `dist/ColonPop.app` and a versioned ZIP. The ZIP includes the app and its source in the `Source` folder. All emoji data is included for offline builds. For public distribution, set `CODESIGN_IDENTITY` to your Developer ID Application identity when running the script. Submit the signed ZIP for Apple notarization, staple the ticket to the app, then ZIP the stapled app for distribution. [Apple’s notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+To check Chrome manually, open `Tests/Browser/chrome.html` in Chrome and try each of the three fields. The page tracks Return and form submissions locally. For a repeatable cross-process check, run `./scripts/test-chrome.sh` on an interactive Mac with Chrome installed and Accessibility allowed for the test application. That check sends Return to the production event handler in memory, then verifies Chrome’s real input event, surrounding text, and rich formatting. Its isolated test application is built under `.build`.
+
+The packaging script builds and verifies both architectures, creates the app icon, and produces `dist/ColonPop.app` and a versioned ZIP. The ZIP includes the app and its source in the `Source` folder. All emoji data is included for offline builds. For public distribution, set `CODESIGN_IDENTITY` to your Developer ID Application identity when running the script. Submit the signed ZIP for Apple notarization, staple the ticket to the app, then ZIP the stapled app for distribution. [Apple’s notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 
 ## License and emoji data
 

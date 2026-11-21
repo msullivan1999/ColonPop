@@ -6,6 +6,8 @@ enum SuffixEvidence {
     case text(String), unsupported, failed
 }
 
+enum SelectionWrite { case issued(onVerified: (() -> Void)?), busy, unavailable }
+
 enum ReplacementCheck {
     static func permits(_ literal: String, start: Int?, caret: NSRange?,
                         suffix: SuffixEvidence, simpleTextControl: Bool) -> Bool {
@@ -30,10 +32,13 @@ protocol FocusedEditor {
     var pid: pid_t { get }
     var selection: NSRange? { get }
     var simpleTextControl: Bool { get }
+    var browserEditor: Bool { get }
+    func stillOwnsFocus() -> Bool
     func sameEditor(as other: any FocusedEditor) -> Bool
     func text(in range: NSRange) -> SuffixEvidence
     func setSelection(_ range: NSRange) -> AXError
     func replaceSelectedText(with text: String) -> AXError
+    func replaceBrowserSelection(_ literal: String, with glyph: String) -> SelectionWrite
     func selectedText() -> String?
     func caretBounds() -> CGRect?
 }
@@ -45,6 +50,46 @@ struct FocusField: FocusedEditor {
     let window: AXUIElement?
     let selection: NSRange?
     let simpleTextControl: Bool
+
+    var browserEditor: Bool {
+        guard let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier else { return false }
+        return ["com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev",
+                "com.google.Chrome.canary", "org.chromium.Chromium"].contains(id)
+    }
+
+    func stillOwnsFocus() -> Bool {
+        guard Self.frontmostEditorPID() == pid else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.06)
+        if let focused = Self.elementAttribute(app, kAXFocusedUIElementAttribute) {
+            return CFEqual(focused, element)
+        }
+        var flag: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, kAXFocusedAttribute as CFString, &flag) == .success && flag as? Bool == true
+    }
+
+    func replaceBrowserSelection(_ literal: String, with glyph: String) -> SelectionWrite {
+        // Newer renderers can replace a verified marker directly without using the pasteboard.
+        var names: CFArray?
+        let operation = "AXTextOperation"
+        if AXUIElementCopyParameterizedAttributeNames(element, &names) == .success,
+           (names as? [String])?.contains(operation) == true {
+            var markers: CFTypeRef?
+            var selected: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, "AXSelectedTextMarkerRange" as CFString, &markers) == .success,
+               let markers, CFGetTypeID(markers) == AXTextMarkerRangeGetTypeID(),
+               AXUIElementCopyParameterizedAttributeValue(element, "AXStringForTextMarkerRange" as CFString, markers, &selected) == .success,
+               selected as? String == literal {
+                let parameters: [String: Any] = ["AXTextOperationType": "TextOperationReplacePreserveCase",
+                                                  "AXTextOperationMarkerRanges": [markers],
+                                                  "AXTextOperationReplacementString": glyph]
+                var result: CFTypeRef?
+                let status = AXUIElementCopyParameterizedAttributeValue(element, operation as CFString, parameters as CFDictionary, &result)
+                if status == .success || status == .cannotComplete { return .issued(onVerified: nil) }
+            }
+        }
+        return BrowserPaste.shared.replace(literal, with: glyph, in: self)
+    }
 
     static func frontmostEditorPID() -> pid_t? {
         guard !IsSecureEventInputEnabled(),
@@ -106,8 +151,7 @@ struct FocusField: FocusedEditor {
         guard let other = other as? FocusField, pid == other.pid, CFEqual(element, other.element) else { return false }
         switch (window, other.window) {
         case (let a?, let b?): return CFEqual(a, b)
-        case (nil, nil): return true
-        default: return false
+        default: return true // The same AX element can briefly omit its window during a web update.
         }
     }
 

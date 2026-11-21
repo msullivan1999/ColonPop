@@ -15,6 +15,10 @@ private final class EditorFixture {
     var ignoresSelection = false
     var ignoresReplacement = false
     var nativeWrites = 0
+    var browserEditor = false
+    var browserWrites = 0
+    var browserBusy = 0
+    var ownsFocus = true
 
     init(_ before: String, _ after: String, pid: pid_t = 73) {
         self.pid = pid
@@ -32,6 +36,15 @@ private final class EditorFixture {
         let selection: NSRange?
         var pid: pid_t { host.pid }
         let simpleTextControl = true
+        var browserEditor: Bool { host.browserEditor }
+        func stillOwnsFocus() -> Bool { host.ownsFocus }
+        func replaceBrowserSelection(_ literal: String, with glyph: String) -> SelectionWrite {
+            if host.browserBusy > 0 { host.browserBusy -= 1; return .busy }
+            guard selectedText() == literal else { return .unavailable }
+            host.browserWrites += 1
+            host.view.insertText(glyph, replacementRange: host.view.selectedRange())
+            return .issued(onVerified: nil)
+        }
 
         func sameEditor(as other: any FocusedEditor) -> Bool { (other as? Snapshot)?.host === host }
         func caretBounds() -> CGRect? { nil }
@@ -67,7 +80,7 @@ private final class TestPicker: PickerSurface {
     var frame: CGRect { CGRect(x: -600, y: 990, width: 300, height: CGFloat(items.count) * 34 + 34) }
     func hide() { items = [] }
     func showInsertionFailure(needsKeyboardAccess: Bool) { failureShown = true }
-    func show(_ items: [Candidate], selected: Int, quartzCaret: CGRect?) { self.items = items }
+    func show(_ items: [Candidate], selected: Int?, quartzCaret: CGRect?) { self.items = items }
     func contains(quartzPoint: CGPoint) -> Bool { frame.contains(CGPoint(x: quartzPoint.x, y: top - quartzPoint.y)) }
     func candidate(atQuartzPoint point: CGPoint) -> Candidate? {
         PopupPlacement.rowIndex(atQuartzPoint: point, panel: frame, primaryTop: top, count: items.count).map { items[$0] }
@@ -134,6 +147,75 @@ private final class InputFixture {
 }
 
 final class InsertionTests: XCTestCase {
+    @MainActor
+    func testChromeReturnReplacesOnlyTheVerifiedTokenWithEitherPermission() async throws {
+        for canPost in [false, true] {
+            let f = InputFixture("🧑🏾‍💻 ", " after")
+            f.host.browserEditor = true
+            f.canPost = canPost
+            f.type(":wave")
+            XCTAssertFalse(f.key("\r", code: kVK_Return))
+            try await f.waitFor { f.host.view.string == "🧑🏾‍💻 👋 after" }
+            XCTAssertEqual(f.host.browserWrites, 1)
+            XCTAssertEqual(f.host.nativeWrites, 0)
+            XCTAssertTrue(f.posted.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testChromeDoesNotReceiveFormReturnWhileItsFocusTreeRefreshes() async throws {
+        let f = InputFixture()
+        f.host.browserEditor = true
+        f.type(":wave")
+        try await f.waitFor { !f.picker.items.isEmpty }
+        f.editorAvailable = false
+        XCTAssertFalse(f.key("\r", code: kVK_Return))
+        XCTAssertEqual(f.host.view.string, ":wave")
+        f.editorAvailable = true
+        try await f.waitFor { f.host.view.string == "👋" }
+    }
+
+    @MainActor
+    func testChromePendingReturnCannotEditASecondField() async throws {
+        let f = InputFixture()
+        f.host.browserEditor = true
+        let first = f.host
+        f.type(":wave")
+        f.editorAvailable = false
+        XCTAssertFalse(f.key("\r", code: kVK_Return))
+        f.host = EditorFixture(":wave", "", pid: first.pid)
+        f.editorAvailable = true
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(first.view.string, ":wave")
+        XCTAssertEqual(f.host.view.string, ":wave")
+        XCTAssertEqual(first.browserWrites, 0)
+    }
+
+    @MainActor
+    func testChromePassesReturnIfFocusActuallyLeftTheOriginalField() {
+        let f = InputFixture()
+        f.host.browserEditor = true
+        f.type(":wave")
+        f.editorAvailable = false
+        f.host.ownsFocus = false
+        XCTAssertTrue(f.key("\r", code: kVK_Return, deliver: false))
+        XCTAssertEqual(f.host.browserWrites, 0)
+    }
+
+    @MainActor
+    func testChromeWithOnlySelectedTextAvailableCanFinishAQueuedEditOnce() async throws {
+        let f = InputFixture("Hello ", "!")
+        f.host.browserEditor = true
+        f.host.rangeReadFails = true
+        f.host.browserBusy = 2
+        f.canPost = false
+        f.type(":wave")
+        XCTAssertFalse(f.key("\t", code: kVK_Tab))
+        try await f.waitFor { f.host.view.string == "Hello 👋!" }
+        XCTAssertEqual(f.host.browserWrites, 1)
+        XCTAssertFalse(f.picker.failureShown)
+    }
+
     @MainActor
     func testLateEditorRecoversTheFirstColonAndQueryBeforeReturn() async throws {
         let f = InputFixture("Before ", " after")

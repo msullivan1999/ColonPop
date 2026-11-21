@@ -4,6 +4,7 @@ import ServiceManagement
 
 enum AppState: Equatable {
     case accessibility, inputMonitoring, unavailable, nativeInsertion, ready, paused
+    var pickerAvailable: Bool { self == .ready || self == .nativeInsertion }
 
     static func refresh(paused: Bool, trusted: Bool, canPost: Bool, canListen: @autoclosure () -> Bool,
                         start: () -> Bool, stop: () -> Void) -> Self {
@@ -29,15 +30,15 @@ enum AppState: Equatable {
     var detail: String {
         switch self {
         case .accessibility:
-            return "Allow the copy of ColonPop shown below in Accessibility. If an older copy is already listed after an update, remove that entry and add this app."
+            return "In Privacy & Security, allow the app shown below to edit the field you’re typing in. After an update, you may need to remove the old ColonPop entry and add this copy."
         case .inputMonitoring:
             return "Your Mac also requires Input Monitoring. Turn on ColonPop there, then reopen the app if macOS asks."
         case .unavailable:
             return "macOS couldn’t connect the keyboard listener. Check ColonPop in Accessibility, then try again."
         case .nativeInsertion:
-            return "The keyboard listener is running. ColonPop can insert in fields that support Accessibility editing. Allow keyboard insertion to use other fields."
+            return "Type an emoji name after a colon and press Return. If a field can’t insert the emoji, you can also allow keyboard insertion."
         case .ready:
-            return "In a text field, type :wave after a space or at the start of a line. Press Return to insert 👋. Escape keeps the text you typed."
+            return "Start after a space or at the beginning of a field. Use the arrow keys to choose an emoji, Return to insert it, or Escape to keep what you typed."
         case .paused:
             return "Resume the picker whenever you want to use emoji shortcodes again."
         }
@@ -56,61 +57,93 @@ enum AppState: Equatable {
 }
 
 @MainActor
-private final class WelcomeWindow {
-    private let window: NSWindow
+final class WelcomeWindow {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 288),
+                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
     private let heading = NSTextField(labelWithString: "")
     private let detail = NSTextField(wrappingLabelWithString: "")
+    private let build = NSTextField(labelWithString: "")
+    private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
     private let action = NSButton(title: "", target: nil, action: nil)
+    private let test = NSButton(title: "Test Picker…", target: nil, action: nil)
+    private var displayed: AppState?
     var onAction: (() -> Void)?
     var onTest: (() -> Void)?
 
     init() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 410, height: 304),
-                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "ColonPop"
+        window.title = "ColonPop Setup"
         window.isReleasedWhenClosed = false
         window.center()
         let content = window.contentView!
-        let sample = NSTextField(labelWithString: ":wave:   →   👋")
-        sample.font = .monospacedSystemFont(ofSize: 24, weight: .medium)
-        sample.frame = NSRect(x: 28, y: 241, width: 354, height: 36)
-        heading.font = .systemFont(ofSize: 21, weight: .semibold)
-        heading.frame = NSRect(x: 28, y: 196, width: 354, height: 30)
+        heading.font = .systemFont(ofSize: 22, weight: .semibold)
         detail.font = .systemFont(ofSize: 13)
-        detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 28, y: 104, width: 354, height: 80)
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
-        let build = NSTextField(labelWithString: "Version \(version)  ·  \(Bundle.main.bundlePath)")
+        detail.preferredMaxLayoutWidth = 392
+        detail.maximumNumberOfLines = 0
+        let sample = NSTextField(labelWithString: ":wave   ↩   👋")
+        sample.font = .monospacedSystemFont(ofSize: 20, weight: .medium)
+        sample.setAccessibilityLabel("Type colon wave, then press Return to insert a waving hand.")
         build.font = .systemFont(ofSize: 11)
         build.textColor = .secondaryLabelColor
         build.lineBreakMode = .byTruncatingMiddle
+        build.cell?.usesSingleLineMode = true
+        build.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         build.toolTip = Bundle.main.bundlePath
         build.isSelectable = true
-        build.frame = NSRect(x: 28, y: 78, width: 354, height: 20)
-        action.bezelStyle = .rounded
-        action.controlSize = .large
-        action.keyEquivalent = "\r"
-        action.target = self
+
+        let info = NSStackView(views: [heading, detail, sample, build])
+        info.orientation = .vertical
+        info.alignment = .leading
+        info.spacing = 9
+        info.setCustomSpacing(16, after: detail)
+        let divider = NSBox()
+        divider.boxType = .separator
+        for button in [test, action] {
+            button.bezelStyle = .rounded
+            button.controlSize = .regular
+            button.target = self
+        }
+        test.action = #selector(testPressed)
         action.action = #selector(pressed)
-        let test = NSButton(title: "Test Picker…", target: self, action: #selector(testPressed))
-        test.bezelStyle = .rounded
-        test.sizeToFit()
-        test.setFrameOrigin(NSPoint(x: 382 - test.frame.width, y: 24))
-        for view in [sample, heading, detail, build, action, test] as [NSView] { content.addSubview(view) }
+        action.keyEquivalent = "\r"
+        for view in [info, divider, test, action] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            info.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
+            info.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
+            info.widthAnchor.constraint(equalToConstant: 392),
+            info.topAnchor.constraint(equalTo: content.topAnchor, constant: 22),
+            build.widthAnchor.constraint(lessThanOrEqualTo: info.widthAnchor),
+            detail.widthAnchor.constraint(equalTo: info.widthAnchor),
+            divider.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            divider.topAnchor.constraint(greaterThanOrEqualTo: info.bottomAnchor, constant: 12),
+            divider.bottomAnchor.constraint(equalTo: action.topAnchor, constant: -14),
+            action.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            action.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+            test.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            test.centerYAnchor.constraint(equalTo: action.centerYAnchor),
+            test.trailingAnchor.constraint(lessThanOrEqualTo: action.leadingAnchor, constant: -12)
+        ])
     }
 
     func update(_ state: AppState) {
+        guard displayed != state else { return }
+        displayed = state
         heading.stringValue = state.heading
         detail.stringValue = state.detail
+        build.stringValue = state.pickerAvailable || state == .paused
+            ? "Version \(version)" : "Version \(version)  ·  \(Bundle.main.bundlePath)"
         action.title = state.buttonTitle
-        action.sizeToFit()
-        action.setFrameOrigin(NSPoint(x: 25, y: 24))
+        test.isHidden = !state.pickerAvailable
     }
 
     func show() {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
+
     func close() { window.close() }
     @objc private func pressed() { onAction?() }
     @objc private func testPressed() { onTest?() }
@@ -122,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var monitor: KeyboardMonitor?
     private let toggle = NSMenuItem(title: "", action: #selector(togglePicker), keyEquivalent: "")
     private let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
+    private let test = NSMenuItem(title: "Test Picker…", action: #selector(testPicker), keyEquivalent: "")
     private lazy var welcome = WelcomeWindow()
     private var timer: Timer?
     private var paused = false
@@ -154,7 +188,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
         let setup = NSMenuItem(title: "ColonPop Setup…", action: #selector(showSetup), keyEquivalent: "")
-        let test = NSMenuItem(title: "Test Picker…", action: #selector(testPicker), keyEquivalent: "")
         let quit = NSMenuItem(title: "Quit ColonPop", action: #selector(quitApp), keyEquivalent: "q")
         for actionItem in [setup, test, toggle, login, quit] { actionItem.target = self }
         menu.addItem(setup)
@@ -173,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             center.addObserver(self, selector: #selector(reconnect(_:)), name: name, object: nil)
         }
         refresh()
-        if state != .ready { welcome.show() }
+        if !state.pickerAvailable { welcome.show() }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -182,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        BrowserPaste.shared.finish()
         timer?.invalidate()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         monitor?.stop()
@@ -195,8 +229,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                  stop: { monitor?.stop() })
         welcome.update(state)
         toggle.title = paused ? "Resume Picker" : "Pause Picker"
-        toggle.isEnabled = state == .ready || state == .nativeInsertion || state == .paused
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        toggle.isEnabled = state.pickerAvailable || paused
+        test.isEnabled = state.pickerAvailable
+        let loginStatus = SMAppService.mainApp.status
+        login.state = loginStatus == .enabled ? .on : .off
+        login.title = loginStatus == .requiresApproval ? "Approve Open at Login…" : "Open at Login"
         item?.button?.appearsDisabled = state == .paused
         item?.button?.toolTip = "ColonPop — " + state.heading
         let interval: TimeInterval = state == .ready ? 15 : 3

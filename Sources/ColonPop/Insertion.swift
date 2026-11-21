@@ -1,6 +1,14 @@
 import AppKit
 
 extension FocusedEditor {
+    func hasSelected(_ literal: String) -> Bool {
+        if let selection, selection.length > 0, selection.length != literal.utf16.count { return false }
+        if selectedText() == literal { return true }
+        if let range = selection, range.length == literal.utf16.count,
+           case .text(let text) = text(in: range) { return text == literal }
+        return false
+    }
+
     func permitsStart(at location: Int?, keyboardBoundary: Bool) -> Bool {
         guard let location else { return keyboardBoundary }
         guard location > 0 else { return true }
@@ -16,15 +24,18 @@ extension FocusedEditor {
 /// processed the last physical keystroke. Only a read can be retried after a write.
 @MainActor
 final class Insertion {
-    enum Step { case wait, selectBackwards(Int), replace(backspaces: Int), done, stop }
+    enum Step { case wait, selectBackwards(Int), replace(backspaces: Int), done, failed, stop }
 
     let editor: any FocusedEditor
     let literal: String
     let glyph: String
     let accessibilityOnly: Bool
     let openingOffset: Int?
+    let browserEditor: Bool
     private(set) var requestedSelection = false
+    private var requestedStart: Int?
     private var nativeWriteStart: Int?
+    private var verifiedWrite: (() -> Void)?
 
     init(editor: any FocusedEditor, literal: String, glyph: String, openingOffset: Int?, accessibilityOnly: Bool) {
         self.editor = editor
@@ -32,6 +43,7 @@ final class Insertion {
         self.glyph = glyph
         self.accessibilityOnly = accessibilityOnly
         self.openingOffset = openingOffset
+        self.browserEditor = editor.browserEditor
     }
 
     func next(in current: any FocusedEditor, allowSelection: Bool) -> Step {
@@ -41,17 +53,17 @@ final class Insertion {
 
         if let start = nativeWriteStart {
             // A setter may report success before the editor applies it. Never write twice.
-            if case .text(let text) = current.text(in: NSRange(location: start, length: glyph.utf16.count)), text == glyph {
+            if current.selectedText() == glyph ||
+                matchesInsertedText(in: current, at: start) {
+                verifiedWrite?()
+                verifiedWrite = nil
                 return .done
             }
-            if current.selectedText() == glyph { return .done }
             return .wait
         }
         if requestedSelection {
             if let caret, caret.length > 0, caret.length != count { return .stop }
-            if current.selectedText() == literal { return replaceSelection(in: current) }
-            if let caret, caret.length == count,
-               case .text(let selected) = current.text(in: caret), selected == literal {
+            if current.hasSelected(literal), !browserEditor || allowSelection {
                 return replaceSelection(in: current)
             }
             return .wait
@@ -63,20 +75,23 @@ final class Insertion {
         } else {
             evidence = .unsupported
         }
-        if accessibilityOnly {
+        if accessibilityOnly || browserEditor {
             guard allowSelection, let caret else { return .wait }
             let start: Int
             if case .text(let suffix) = evidence, suffix == literal {
                 start = caret.location - count
-            } else if let opening = openingOffset, caret.location == opening {
+            } else if let opening = openingOffset, caret.location == opening || caret.location - count == opening {
                 start = opening
             } else {
                 return .wait
             }
             let range = NSRange(location: start, length: count)
-            guard case .text(let text) = current.text(in: range), text == literal else { return .wait }
+            if case .text(let text) = current.text(in: range), text != literal { return .wait }
+            // Selecting is reversible. Some web fields only reveal text after it is selected.
             switch current.setSelection(range) {
-            case .success, .cannotComplete: requestedSelection = true
+            case .success, .cannotComplete:
+                requestedSelection = true
+                requestedStart = start
             default: break
             }
             return .wait
@@ -110,10 +125,34 @@ final class Insertion {
         return verifyWithKeyboard(in: current)
     }
 
+    private func matchesInsertedText(in current: any FocusedEditor, at start: Int) -> Bool {
+        if case .text(let text) = current.text(in: NSRange(location: start, length: glyph.utf16.count)) {
+            return text == glyph
+        }
+        // In a selection-only web control a change in length also distinguishes a paste
+        // from merely collapsing the original selection. Never use this to authorize a write.
+        return browserEditor && literal.utf16.count != glyph.utf16.count &&
+            current.selection == NSRange(location: start + glyph.utf16.count, length: 0) && current.selectedText() == ""
+    }
+
     private func replaceSelection(in current: any FocusedEditor) -> Step {
-        guard accessibilityOnly else { return .replace(backspaces: 0) }
-        guard let range = current.selection, range.length == literal.utf16.count else { return .wait }
-        nativeWriteStart = range.location
+        guard accessibilityOnly || browserEditor else { return .replace(backspaces: 0) }
+        let reported = current.selection.flatMap { $0.length == literal.utf16.count ? $0.location : nil }
+        guard let start = reported ?? requestedStart else { return .wait }
+        if browserEditor {
+            switch current.replaceBrowserSelection(literal, with: glyph) {
+            case .busy: return .wait
+            case .unavailable:
+                guard !accessibilityOnly else { return .failed }
+                nativeWriteStart = start
+                return .replace(backspaces: 0)
+            case .issued(let onVerified):
+                verifiedWrite = onVerified
+                nativeWriteStart = start
+                return .wait
+            }
+        }
+        nativeWriteStart = start
         _ = current.replaceSelectedText(with: glyph)
         return .wait
     }
@@ -125,7 +164,7 @@ final class Insertion {
     }
 
     func cancelSelection(in current: any FocusedEditor, collapseWithArrow: () -> Void) {
-        guard requestedSelection, editor.sameEditor(as: current) else { return }
+        guard requestedSelection, nativeWriteStart == nil, editor.sameEditor(as: current) else { return }
         if let range = current.selection, range.length > 0, range.length <= literal.utf16.count {
             if current.setSelection(NSRange(location: NSMaxRange(range), length: 0)) == .success { return }
         }

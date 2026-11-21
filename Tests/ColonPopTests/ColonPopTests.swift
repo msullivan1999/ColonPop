@@ -64,17 +64,32 @@ final class ColonPopTests: XCTestCase {
         XCTAssertEqual(composer.literal, ":s")
     }
 
+    func testReturnHintOnlyHighlightsAnActionableChoice() {
+        var composer = composing()
+        XCTAssertNil(composer.highlightedIndex)
+        XCTAssertEqual(composer.handle(.down), .consume)
+        XCTAssertEqual(composer.highlightedIndex, 0)
+        XCTAssertEqual(composer.handle(.enter), .insert(composer.matches[0]))
+        composer = composing("wave")
+        XCTAssertEqual(composer.highlightedIndex, 0)
+        composer = composing("xyzxyz")
+        XCTAssertNil(composer.highlightedIndex)
+    }
+
     func testPlainColonAndUnmatchedNamesPreserveHostKeys() {
         for key: InputKey in [.enter, .tab, .text(":"), .backspace, .text(" ")] {
             var composer = composing()
             XCTAssertEqual(composer.handle(key), .pass)
             XCTAssertNil(composer.query)
         }
-        for key: InputKey in [.enter, .tab, .down, .escape, .text(":")] {
+        for key: InputKey in [.enter, .tab, .down, .text(":")] {
             var composer = composing("xyzxyz")
             XCTAssertEqual(composer.handle(key), .pass)
             XCTAssertNil(composer.query)
         }
+        var emptyResults = composing("xyzxyz")
+        XCTAssertEqual(emptyResults.handle(.escape), .consume)
+        XCTAssertNil(emptyResults.query)
     }
 
     func testEscapeNavigationAndLengthLimit() {

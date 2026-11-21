@@ -90,6 +90,7 @@ final class KeyboardMonitor {
     private var consumedCodes: Set<Int64> = []
     private var redrawPending = false
     private var focusTimer: Timer?
+    private var missedFocusPoll = false
     init(catalog: Catalog, picker: any PickerSurface,
          readEditor: @escaping @MainActor (Bool) -> (any FocusedEditor)? = { FocusField.current(prepareEditor: $0) },
          frontmostPID: @escaping @MainActor () -> pid_t? = { FocusField.frontmostEditorPID() },
@@ -206,7 +207,16 @@ final class KeyboardMonitor {
             cancelPending()
         }
         if let target {
-            guard let current = readEditor(false), target.sameEditor(as: current) else {
+            let current = readEditor(false)
+            if current == nil, target.browserEditor, frontmostPID() == target.pid, target.stillOwnsFocus(),
+               key == .enter || key == .tab, let index = composer.highlightedIndex {
+                // A web renderer can briefly omit focus. Consume the visible choice now
+                // so Return cannot submit a form. The edit still has to prove the same field.
+                confirm(composer.matches[index])
+                consumedCodes.insert(code)
+                return false
+            }
+            guard let current, target.sameEditor(as: current) else {
                 resetContext()
                 return true
             }
@@ -298,7 +308,7 @@ final class KeyboardMonitor {
     }
 
     private func schedule(_ edit: Insertion, attempt: Int) {
-        let delays = [0, 12, 24, 40, 60, 80]
+        let delays = edit.browserEditor ? [0, 12, 24, 40, 60, 80, 120, 180, 260, 300] : [0, 12, 24, 40, 60, 80]
         guard attempt < delays.count else {
             let stillInEditor = !IsSecureEventInputEnabled() && readEditor(false).map { edit.editor.sameEditor(as: $0) } == true
             cancelPending()
@@ -324,13 +334,15 @@ final class KeyboardMonitor {
         switch edit.next(in: current, allowSelection: allowSelection) {
         case .replace(let backspaces):
             guard let events = Keyboard.events(text: edit.glyph, backspaces: backspaces) else { cancelPending(); return true }
-            pending = nil
-            scheduled?.cancel()
-            scheduled = nil
+            if !edit.browserEditor {
+                pending = nil
+                scheduled?.cancel()
+                scheduled = nil
+            }
             boundary = true
             if let proxy { events.forEach { $0.tapPostEvent(proxy) } }
             else { post(events, current.pid) }
-            return true
+            return !edit.browserEditor
         case .selectBackwards(let count):
             guard let keys = Keyboard.arrowEvents(selectBackwards: count) else { cancelPending(); return true }
             post(keys, current.pid)
@@ -339,6 +351,10 @@ final class KeyboardMonitor {
             pending = nil
             scheduled = nil
             boundary = true
+            return true
+        case .failed:
+            cancelPending()
+            picker.showInsertionFailure(needsKeyboardAccess: edit.accessibilityOnly)
             return true
         case .stop: cancelPending(); return true
         case .wait: return false
@@ -363,15 +379,24 @@ final class KeyboardMonitor {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.redrawPending = false
-            self.picker.show(self.composer.matches, selected: self.composer.selection, quartzCaret: self.caretAnchor)
+            guard self.target != nil, self.composer.query != nil else { return }
+            self.picker.show(self.composer.matches, selected: self.composer.highlightedIndex, quartzCaret: self.caretAnchor)
         }
     }
 
     private func watchFocus() {
+        missedFocusPoll = false
         let timer = Timer(timeInterval: 0.35, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let target = self.target else { return }
-                if self.readEditor(false).map({ target.sameEditor(as: $0) }) != true { self.resetContext() }
+                if let current = self.readEditor(false) {
+                    self.missedFocusPoll = false
+                    if !target.sameEditor(as: current) { self.resetContext() }
+                } else if !self.missedFocusPoll, target.browserEditor, target.stillOwnsFocus() {
+                    self.missedFocusPoll = true
+                } else {
+                    self.resetContext()
+                }
             }
         }
         timer.tolerance = 0.08

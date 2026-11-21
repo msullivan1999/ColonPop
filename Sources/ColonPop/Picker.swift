@@ -17,8 +17,9 @@ enum PopupPlacement {
         CGRect(x: quartz.minX, y: primaryTop - quartz.maxY, width: quartz.width, height: quartz.height)
     }
 
-    static func frame(size: CGSize, near anchor: CGRect, inside screen: CGRect) -> CGRect {
+    static func frame(size requested: CGSize, near anchor: CGRect, inside screen: CGRect) -> CGRect {
         let safe = screen.insetBy(dx: 6, dy: 6)
+        let size = CGSize(width: min(requested.width, safe.width), height: min(requested.height, safe.height))
         let below = anchor.minY - size.height - 5
         let preferredY = below >= safe.minY ? below : anchor.maxY + 5
         return CGRect(x: max(safe.minX, min(anchor.minX, safe.maxX - size.width)),
@@ -35,10 +36,12 @@ private final class PassivePanel: NSPanel {
 private final class CandidateRow: NSView {
     private let glyph = NSTextField(labelWithString: "")
     private let alias = NSTextField(labelWithString: "")
-    private let enter = NSTextField(labelWithString: "↵")
+    private let enter = NSTextField(labelWithString: "↩")
     var choose: (() -> Void)?
     private(set) var candidate: Candidate?
     private var selected = false
+    private var hovered = false
+    private var hoverArea: NSTrackingArea?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -63,14 +66,28 @@ private final class CandidateRow: NSView {
         self.selected = selected
         glyph.stringValue = item.glyph
         alias.stringValue = ":" + item.alias + ":"
-        alias.textColor = selected ? .white : .labelColor
-        enter.textColor = .white
+        alias.textColor = selected ? .selectedMenuItemTextColor : .labelColor
+        enter.textColor = .selectedMenuItemTextColor
         enter.isHidden = !selected
         toolTip = item.name
         setAccessibilityLabel(item.name + ", " + alias.stringValue)
         setAccessibilitySelected(selected)
         needsDisplay = true
     }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        hoverArea = area
+        addTrackingArea(area)
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    func clearHover() { hovered = false; needsDisplay = true }
 
     override func layout() {
         super.layout()
@@ -80,8 +97,8 @@ private final class CandidateRow: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if selected {
-            NSColor.controlAccentColor.setFill()
+        if selected || hovered {
+            (selected ? NSColor.selectedContentBackgroundColor : NSColor.quaternaryLabelColor).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
         }
     }
@@ -98,7 +115,7 @@ private final class CandidateRow: NSView {
 protocol PickerSurface: AnyObject {
     var onPick: ((Candidate) -> Void)? { get set }
     func hide()
-    func show(_ items: [Candidate], selected: Int, quartzCaret: CGRect?)
+    func show(_ items: [Candidate], selected: Int?, quartzCaret: CGRect?)
     func showInsertionFailure(needsKeyboardAccess: Bool)
     func contains(quartzPoint: CGPoint) -> Bool
     func candidate(atQuartzPoint point: CGPoint) -> Candidate?
@@ -116,7 +133,6 @@ final class Picker: PickerSurface {
     private let width: CGFloat = 300
 
     init() {
-        panel.level = .popUpMenu
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -125,6 +141,7 @@ final class Picker: PickerSurface {
         panel.worksWhenModal = true
         panel.isReleasedWhenClosed = false
         panel.isFloatingPanel = true
+        panel.level = .popUpMenu
         panel.animationBehavior = .none
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.setAccessibilityLabel("Emoji suggestions")
@@ -151,6 +168,7 @@ final class Picker: PickerSurface {
     func hide() {
         failureDismissal?.cancel()
         failureDismissal = nil
+        rows.forEach { $0.clearHover() }
         if panel.isVisible { panel.orderOut(nil) }
     }
 
@@ -160,12 +178,12 @@ final class Picker: PickerSurface {
         let frame = panel.frame
         panel.setFrame(CGRect(x: frame.minX, y: frame.maxY - 34, width: frame.width, height: 34), display: false)
         panel.ignoresMouseEvents = true
-        hint.stringValue = needsKeyboardAccess ? "Allow keyboard insertion in ColonPop Setup." : "Couldn’t verify the shortcode in this field."
+        hint.stringValue = needsKeyboardAccess ? "Couldn’t insert here. See ColonPop Setup." : "Couldn’t replace the shortcode in this field."
         hint.frame = NSRect(x: 12, y: 8, width: frame.width - 24, height: 17)
         panel.orderFrontRegardless()
         let dismissal = DispatchWorkItem { [weak self] in self?.hide() }
         failureDismissal = dismissal
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: dismissal)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: dismissal)
     }
 
     func contains(quartzPoint: CGPoint) -> Bool {
@@ -180,12 +198,14 @@ final class Picker: PickerSurface {
         return rows[index].candidate
     }
 
-    func show(_ items: [Candidate], selected: Int, quartzCaret: CGRect?) {
-        guard !items.isEmpty, let primary = NSScreen.screens.first else { hide(); return }
+    func show(_ items: [Candidate], selected: Int?, quartzCaret: CGRect?) {
+        guard let primary = NSScreen.screens.first else { hide(); return }
         failureDismissal?.cancel()
         failureDismissal = nil
-        panel.ignoresMouseEvents = false
-        hint.stringValue = "↑↓  Choose       ↵  Insert       esc  Dismiss"
+        panel.ignoresMouseEvents = items.isEmpty
+        if items.isEmpty { hint.stringValue = "No matching emoji" }
+        else if selected == nil { hint.stringValue = "Type a name or use ↓ to choose" }
+        else { hint.stringValue = "↑↓  Choose      ↩  Insert      esc  Dismiss" }
         let caret = quartzCaret.map { PopupPlacement.appKitRect($0, primaryTop: primary.frame.maxY) }
         let pointer = NSEvent.mouseLocation
         let screenAtCaret = caret.flatMap { rect in
@@ -202,7 +222,7 @@ final class Picker: PickerSurface {
             row.frame = PopupPlacement.rowFrame(i, in: panel.frame.size)
             row.configure(with: items[i], selected: i == selected)
         }
-        hint.frame = NSRect(x: 15, y: 6, width: width - 30, height: 16)
+        hint.frame = NSRect(x: 15, y: 7, width: panel.frame.width - 30, height: 16)
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
 }

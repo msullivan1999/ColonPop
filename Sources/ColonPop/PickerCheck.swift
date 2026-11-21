@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 
 /// Runs in a separate process. Only the ordinary menu-bar process owns the event tap.
 @MainActor
-final class PickerCheck: NSObject, NSApplicationDelegate {
+final class PickerCheck: NSObject, NSApplicationDelegate, NSTextViewDelegate {
     private struct Failure: Error {
         let message: String
         let blocked: Bool
@@ -19,6 +19,7 @@ final class PickerCheck: NSObject, NSApplicationDelegate {
     private let status = NSTextField(wrappingLabelWithString: "Opening the picker check…")
     private var listenerPID: pid_t = 0
     private var passed = 0
+    private var manual = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window.title = "ColonPop Picker Check"
@@ -27,6 +28,12 @@ final class PickerCheck: NSObject, NSApplicationDelegate {
         status.frame = NSRect(x: 22, y: 112, width: 476, height: 76)
         status.font = .systemFont(ofSize: 14)
         editor.isRichText = false
+        editor.delegate = self
+        editor.textContainerInset = NSSize(width: 8, height: 6)
+        editor.wantsLayer = true
+        editor.layer?.cornerRadius = 6
+        editor.layer?.borderWidth = 1
+        editor.layer?.borderColor = NSColor.separatorColor.cgColor
         editor.isAutomaticTextReplacementEnabled = false
         editor.isAutomaticSpellingCorrectionEnabled = false
         editor.isAutomaticQuoteSubstitutionEnabled = false
@@ -42,8 +49,8 @@ final class PickerCheck: NSObject, NSApplicationDelegate {
 
     private func run() async {
         do {
-            guard AXIsProcessTrusted(), CGPreflightPostEventAccess() else {
-                throw Failure("This copy needs Accessibility access to drive the check. Open ColonPop Setup and allow the app shown there.", blocked: true)
+            guard AXIsProcessTrusted() else {
+                throw Failure("Open ColonPop Setup to allow Accessibility for this copy.", blocked: true)
             }
             let app = try await listener()
             listenerPID = app.processIdentifier
@@ -51,6 +58,14 @@ final class PickerCheck: NSObject, NSApplicationDelegate {
             window.makeKeyAndOrderFront(nil)
             window.makeFirstResponder(editor)
             try await wait("The check window did not receive keyboard focus.") { self.ownsFocus }
+            if !CGPreflightPostEventAccess() {
+                if CommandLine.arguments.contains("--exit-after-check") {
+                    throw Failure("The automated check needs keyboard insertion permission.", blocked: true)
+                }
+                manual = true
+                status.stringValue = "Type :wave below and press Return. You can also click the waving hand in the picker."
+                return
+            }
             let catalog = try Catalog.bundled()
 
             start("Opening suggestions on the first colon", prefix: "Before ", suffix: " after")
@@ -123,6 +138,12 @@ final class PickerCheck: NSObject, NSApplicationDelegate {
         config.createsNewApplicationInstance = true
         config.activates = false
         return try await NSWorkspace.shared.openApplication(at: url, configuration: config)
+    }
+
+    func textDidChange(_ notification: Notification) {
+        if manual, editor.string.contains("👋") {
+            status.stringValue = "The waving hand was inserted. You can try another shortcode in this field."
+        }
     }
 
     private var ownsFocus: Bool {

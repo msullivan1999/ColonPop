@@ -30,7 +30,7 @@ version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/
 name="ColonPop-$version-macOS.zip"
 for file in .gitignore LICENSE README.md Package.swift Licenses/gemoji.txt Packaging/Info.plist \
         Sources/ColonPop/*.swift Sources/ColonPop/Resources/emoji.tsv Tests/ColonPopTests/*.swift \
-        scripts/make-icon.swift scripts/package.sh; do
+        Tests/Browser/Check.swift Tests/Browser/chrome.html scripts/test-chrome.sh scripts/make-icon.swift scripts/package.sh; do
     mkdir -p "$release_dir/Source/$(dirname "$file")"
     cp "$file" "$release_dir/Source/$file"
 done

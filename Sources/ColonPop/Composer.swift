@@ -19,6 +19,10 @@ struct Composer {
     init(catalog: Catalog) { self.catalog = catalog }
 
     var literal: String? { query.map { ":" + $0 } }
+    var highlightedIndex: Int? {
+        guard let query, !matches.isEmpty, !query.isEmpty || navigated else { return nil }
+        return selection
+    }
 
     static func canStart(after character: Character?) -> Bool {
         guard let character else { return true }
@@ -60,16 +64,19 @@ struct Composer {
         case .down, .up:
             if !matches.isEmpty {
                 let step = key == .down ? 1 : -1
-                selection = (selection + step + matches.count) % matches.count
+                if highlightedIndex == nil {
+                    selection = key == .down ? 0 : matches.count - 1
+                } else {
+                    selection = (selection + step + matches.count) % matches.count
+                }
                 navigated = true
                 return .consume
             }
         case .enter, .tab:
-            if !matches.isEmpty, !query.isEmpty || navigated { return .insert(matches[selection]) }
+            if let highlightedIndex { return .insert(matches[highlightedIndex]) }
         case .escape:
-            let visible = !matches.isEmpty
             cancel()
-            return visible ? .consume : .pass
+            return .consume
         case .other:
             break
         }

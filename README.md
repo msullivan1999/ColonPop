@@ -10,7 +10,7 @@ A small native macOS menu-bar app for typing emoji by name. In a text field, typ
 
 **After an update**
 
-If Setup still says **Enable ColonPop** when the old entry is already enabled, remove that entry in **System Settings → Privacy & Security → Accessibility**, then add the copy in **Applications**. Setup shows the version and path of the running copy. Ad-hoc builds have a different signing identity each time their code changes. [Apple’s code signing note](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
+If Setup says **Enable ColonPop** while System Settings shows ColonPop switched on, open **Open Accessibility Settings…** in Setup. Some macOS versions call this pane **Device Control and Data Access**. Select the old **ColonPop** row, remove it with the minus button, then use the plus button to add `/Applications/ColonPop.app`. Reopen ColonPop if macOS requests it. When Setup says **Ready to type** or **Suggestions are on**, choose **Test Picker…**. This refresh is needed when moving between the ad-hoc 0.1.2 and 0.1.3 builds because the new program has a different signature. [Apple’s code signing note](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 
 **Suggestions are on** means ColonPop has a working listener and can replace the shortcode in fields that allow Accessibility editing. Choose **Allow Keyboard Insertion…** in Setup for editors that need keyboard events. The smiley also lets you pause ColonPop or turn on **Open at Login**. If another system-wide shortcode picker is running, pause it while trying ColonPop.
 
@@ -59,6 +59,10 @@ dist/ColonPop.app/Contents/MacOS/ColonPop --test-picker --exit-after-check
 To check Chrome manually, open `Tests/Browser/chrome.html` in Chrome and try each of the three fields. The page tracks Return and form submissions locally. For a repeatable cross-process check, run `./scripts/test-chrome.sh` on an interactive Mac with Chrome installed and Accessibility allowed for the test application. That check sends Return to the production event handler in memory, then verifies Chrome’s real input event, surrounding text, and rich formatting. Its isolated test application is built under `.build`.
 
 The packaging script builds and verifies both architectures, creates the app icon, and produces `dist/ColonPop.app` and a versioned ZIP. The ZIP includes the app and its source in the `Source` folder. All emoji data is included for offline builds. For public distribution, set `CODESIGN_IDENTITY` to your Developer ID Application identity when running the script. Submit the signed ZIP for Apple notarization, staple the ticket to the app, then ZIP the stapled app for distribution. [Apple’s notarization guide](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+
+For repeated builds in one checkout, save your chosen signing certificate with `git config --local colonpop.signingIdentity "CERTIFICATE NAME OR FINGERPRINT"`. `CODESIGN_IDENTITY` overrides this setting. Use the same identity for subsequent builds. Moving from an ad-hoc build to a certificate-signed build still needs a one-time approval.
+
+To package an update, run `./scripts/package.sh --upgrade-from /path/to/previous/ColonPop.app`. Packaging stops before replacing the output if the candidate fails the previous app’s signing requirement. You can check two existing apps with `./scripts/check-upgrade.sh PREVIOUS.app UPDATE.app`. Both checks use macOS code signing tools and leave system permissions untouched.
 
 ## License and emoji data
 

@@ -4,7 +4,7 @@ A small native macOS menu-bar app for typing emoji by name. In a text field, typ
 
 ## Install
 
-1. Unzip `ColonPop-0.1.4-macOS.zip`, move **ColonPop.app** to **Applications**, then open it. If updating, choose **Quit ColonPop** from its menu-bar icon before replacing the previous version. The universal binary runs on Apple silicon and Intel Macs with macOS 13 or later.
+1. Unzip `ColonPop-0.1.5-macOS.zip`, move **ColonPop.app** to **Applications**, then open it. If updating, choose **Quit ColonPop** from its menu-bar icon before replacing the previous version. The universal binary runs on Apple silicon and Intel Macs with macOS 13 or later.
 2. Choose **Open Accessibility Settings…** in the setup window and enable **ColonPop**. If your Mac also requires Input Monitoring, the setup window shows that step. Reopen the app if macOS requests a restart.
 3. From the smiley in the menu bar, choose **Test Picker…** to check the installed app. The check opens a temporary editor. If keyboard insertion is enabled, it tests the popup, Return, a row click, Escape, a closing colon and ordinary punctuation automatically. Otherwise, type the example shown in the window. You can also open TextEdit and try `:tada:`.
 

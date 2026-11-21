@@ -99,9 +99,9 @@ final class WelcomeWindow {
         detail.font = .systemFont(ofSize: 13)
         detail.preferredMaxLayoutWidth = 392
         detail.maximumNumberOfLines = 0
-        let sample = NSTextField(labelWithString: ":wave   ↩   👋")
+        let sample = NSTextField(labelWithString: ":wave:   →   👋")
         sample.font = .monospacedSystemFont(ofSize: 20, weight: .medium)
-        sample.setAccessibilityLabel("Type colon wave, then press Return to insert a waving hand.")
+        sample.setAccessibilityLabel("Type a colon, the word wave, and a closing colon to insert a waving hand.")
         build.font = .systemFont(ofSize: 11)
         build.textColor = .secondaryLabelColor
         build.lineBreakMode = .byTruncatingMiddle

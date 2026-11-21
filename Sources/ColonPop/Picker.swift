@@ -33,7 +33,7 @@ private final class PassivePanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-private final class CandidateRow: NSView {
+final class CandidateRow: NSView {
     private let glyph = NSTextField(labelWithString: "")
     private let alias = NSTextField(labelWithString: "")
     var choose: (() -> Void)?
@@ -62,7 +62,7 @@ private final class CandidateRow: NSView {
         candidate = item
         self.selected = selected
         glyph.stringValue = item.glyph
-        alias.stringValue = ":" + item.alias + ":"
+        alias.stringValue = item.alias
         alias.textColor = selected ? .selectedMenuItemTextColor : .labelColor
         toolTip = item.name
         setAccessibilityLabel(item.name + ", " + alias.stringValue)

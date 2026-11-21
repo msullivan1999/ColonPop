@@ -20,6 +20,14 @@ final class WelcomeWindowTests: XCTestCase {
         visibleViews(in: setup.window.contentView!).compactMap { $0 as? NSButton }
     }
 
+    func testSetupExampleShowsHowToTypeTheFullShortcode() throws {
+        let setup = makeSetup(.ready)
+        let labels = visibleViews(in: setup.window.contentView!).compactMap { $0 as? NSTextField }
+        let sample = try XCTUnwrap(labels.first { $0.stringValue.contains("👋") })
+        XCTAssertEqual(sample.stringValue.split(whereSeparator: \.isWhitespace), [":wave:", "→", "👋"])
+        XCTAssertTrue(sample.accessibilityLabel()?.contains("closing colon") == true)
+    }
+
     func testReturnAndTestPickerUseTheirOwnActionsInBothWorkingStates() throws {
         for state in [AppState.nativeInsertion, .ready] {
             let setup = makeSetup(state)

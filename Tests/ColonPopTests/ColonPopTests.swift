@@ -37,6 +37,19 @@ final class ColonPopTests: XCTestCase {
         XCTAssertTrue(catalog.search("xxxabsentxxx").isEmpty)
     }
 
+    @MainActor
+    func testCandidateRowShowsTheBareAliasWhenReused() throws {
+        _ = NSApplication.shared
+        let row = CandidateRow(frame: .zero)
+        for (alias, selected) in [("wave", true), ("+1", false), ("flag-au", true), ("woman_technologist", false)] {
+            let item = try XCTUnwrap(Self.catalog.exactMatch(alias))
+            row.configure(with: item, selected: selected)
+            let labels = row.subviews.compactMap { ($0 as? NSTextField)?.stringValue }
+            XCTAssertEqual(Set(labels), [item.glyph, alias])
+            XCTAssertEqual(row.accessibilityLabel(), "\(item.name), \(alias)")
+        }
+    }
+
     func testReturnTabAndExactDelimiter() {
         for key: InputKey in [.enter, .tab, .text(":")] {
             var composer = composing("wave")

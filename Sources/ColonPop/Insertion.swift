@@ -92,6 +92,13 @@ final class Insertion {
             case .success, .cannotComplete:
                 requestedSelection = true
                 requestedStart = start
+            case .attributeUnsupported, .notImplemented:
+                // Some Chrome controls expose a readable caret and suffix but no writable selection.
+                // Keep keyboard insertion available only when the live suffix matches exactly.
+                if browserEditor, !accessibilityOnly, case .text(let suffix) = evidence, suffix == literal {
+                    nativeWriteStart = start
+                    return .replace(backspaces: count)
+                }
             default: break
             }
             return .wait

@@ -13,6 +13,7 @@ private final class EditorFixture {
     var rangesReadable = true
     var rangeReadFails = false
     var ignoresSelection = false
+    var selectionSupported = true
     var ignoresReplacement = false
     var nativeWrites = 0
     var browserEditor = false
@@ -61,6 +62,7 @@ private final class EditorFixture {
             return .success
         }
         func setSelection(_ range: NSRange) -> AXError {
+            guard host.selectionSupported else { return .attributeUnsupported }
             if !host.ignoresSelection { host.view.setAccessibilitySelectedTextRange(range) }
             return .success
         }
@@ -173,6 +175,18 @@ final class InsertionTests: XCTestCase {
         XCTAssertEqual(f.host.view.string, ":wave")
         f.editorAvailable = true
         try await f.waitFor { f.host.view.string == "👋" }
+    }
+
+    @MainActor
+    func testChromeWithoutWritableRangesCanStillReplaceAVerifiedShortcodeWithKeys() async throws {
+        let f = InputFixture("Before ", " after")
+        f.host.browserEditor = true
+        f.host.selectionSupported = false
+        f.type(":wave")
+        XCTAssertFalse(f.key("\r", code: kVK_Return))
+        try await f.waitFor { f.host.view.string == "Before 👋 after" }
+        XCTAssertEqual(f.posted.count, 1)
+        XCTAssertEqual(f.host.browserWrites, 0)
     }
 
     @MainActor

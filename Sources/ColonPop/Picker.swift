@@ -36,7 +36,6 @@ private final class PassivePanel: NSPanel {
 private final class CandidateRow: NSView {
     private let glyph = NSTextField(labelWithString: "")
     private let alias = NSTextField(labelWithString: "")
-    private let enter = NSTextField(labelWithString: "↩")
     var choose: (() -> Void)?
     private(set) var candidate: Candidate?
     private var selected = false
@@ -49,9 +48,7 @@ private final class CandidateRow: NSView {
         glyph.alignment = .center
         alias.font = .systemFont(ofSize: 13, weight: .medium)
         alias.lineBreakMode = .byTruncatingMiddle
-        enter.font = .systemFont(ofSize: 14, weight: .medium)
-        enter.alignment = .right
-        for label in [glyph, alias, enter] {
+        for label in [glyph, alias] {
             label.setAccessibilityElement(false)
             addSubview(label)
         }
@@ -67,8 +64,6 @@ private final class CandidateRow: NSView {
         glyph.stringValue = item.glyph
         alias.stringValue = ":" + item.alias + ":"
         alias.textColor = selected ? .selectedMenuItemTextColor : .labelColor
-        enter.textColor = .selectedMenuItemTextColor
-        enter.isHidden = !selected
         toolTip = item.name
         setAccessibilityLabel(item.name + ", " + alias.stringValue)
         setAccessibilitySelected(selected)
@@ -92,8 +87,7 @@ private final class CandidateRow: NSView {
     override func layout() {
         super.layout()
         glyph.frame = NSRect(x: 5, y: 4, width: 33, height: 26)
-        alias.frame = NSRect(x: 45, y: 8, width: bounds.width - 80, height: 18)
-        enter.frame = NSRect(x: bounds.width - 30, y: 8, width: 19, height: 18)
+        alias.frame = NSRect(x: 45, y: 8, width: max(0, bounds.width - 45 - 8), height: 18)
     }
 
     override func draw(_ dirtyRect: NSRect) {
